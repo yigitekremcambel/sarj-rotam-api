@@ -75,10 +75,50 @@ const profilGetir = async (req, res) => {
     );
     if (user) {
         const agac_sayisi = (user.kurtarilan_co2_kg / 20).toFixed(1);
+        
+        // KULLANICININ SEÇTİĞİ ARACI 115 LİSTESİNDEN BULUYORUZ
+        const tumAraclar = await araclariGetir();
+        const favoriArac = tumAraclar.find(a => String(a.id) === String(user.favori_arac_id));
+        
+        let arac_resmi = "https://cdn-icons-png.flaticon.com/512/5526/5526306.png"; 
+        let secili_marka = "Marka Seçilmedi";
+        let secili_model = "Araç Seçilmedi";
+
+        if (favoriArac) {
+            secili_marka = favoriArac.marka;
+            secili_model = favoriArac.model;
+            const m = secili_marka.toLowerCase();
+            
+            // MARKALARA GÖRE DİNAMİK ARAÇ FOTOĞRAFI ATAMASI (Yüksek Kaliteli Arka Planı Şeffaf PNG'ler)
+            if (m.includes("togg")) arac_resmi = "https://images.carexpert.com.au/resize/3000/vehicles/togg-t10x.png";
+            else if (m.includes("tesla")) arac_resmi = "https://digitalassets.tesla.com/tesla-contents/image/upload/f_auto,q_auto/Model-Y-Step-1-Half-Desktop-LHD.png";
+            else if (m.includes("byd")) arac_resmi = "https://ev-database.org/img/auto/BYD_SEAL/BYD_SEAL-01.png";
+            else if (m.includes("bmw")) arac_resmi = "https://ev-database.org/img/auto/BMW_i4_M50/BMW_i4_M50-01.png";
+            else if (m.includes("mercedes")) arac_resmi = "https://ev-database.org/img/auto/Mercedes_EQE/Mercedes_EQE-01.png";
+            else if (m.includes("volkswagen") || m.includes("vw")) arac_resmi = "https://ev-database.org/img/auto/Volkswagen_ID4/Volkswagen_ID4-01.png";
+            else if (m.includes("audi")) arac_resmi = "https://ev-database.org/img/auto/Audi_Q4_e-tron/Audi_Q4_e-tron-01.png";
+            else if (m.includes("porsche")) arac_resmi = "https://ev-database.org/img/auto/Porsche_Taycan/Porsche_Taycan-01.png";
+            else if (m.includes("hyundai")) arac_resmi = "https://ev-database.org/img/auto/Hyundai_IONIQ_5/Hyundai_IONIQ_5-01.png";
+            else if (m.includes("kia")) arac_resmi = "https://ev-database.org/img/auto/Kia_EV6/Kia_EV6-01.png";
+            else if (m.includes("mg")) arac_resmi = "https://ev-database.org/img/auto/MG_MG4_Electric/MG_MG4_Electric-01.png";
+            else if (m.includes("volvo") || m.includes("polestar")) arac_resmi = "https://ev-database.org/img/auto/Volvo_EX30/Volvo_EX30-01.png";
+            else if (m.includes("renault") || m.includes("dacia")) arac_resmi = "https://ev-database.org/img/auto/Renault_Megane_E-Tech/Renault_Megane_E-Tech-01.png";
+            else if (m.includes("peugeot") || m.includes("opel") || m.includes("citro")) arac_resmi = "https://ev-database.org/img/auto/Peugeot_e-208/Peugeot_e-208-01.png";
+            else if (m.includes("fiat") || m.includes("jeep")) arac_resmi = "https://ev-database.org/img/auto/Fiat_500e/Fiat_500e-01.png";
+            else if (m.includes("ford")) arac_resmi = "https://ev-database.org/img/auto/Ford_Mustang_Mach-E/Ford_Mustang_Mach-E-01.png";
+            else if (m.includes("nissan")) arac_resmi = "https://ev-database.org/img/auto/Nissan_Ariya/Nissan_Ariya-01.png";
+            else if (m.includes("skoda")) arac_resmi = "https://ev-database.org/img/auto/Skoda_Enyaq_iV_80/Skoda_Enyaq_iV_80-01.png";
+            else if (m.includes("toyota") || m.includes("subaru")) arac_resmi = "https://ev-database.org/img/auto/Toyota_bZ4X/Toyota_bZ4X-01.png";
+            else arac_resmi = `https://logo.clearbit.com/${m.replace(/\s/g, '')}.com`; // Tanınmayan markalar için şirket logosu çeker
+        }
+
         res.json({
             durum: "Başarılı",
             profil: {
                 id: user.id, ad_soyad: user.ad_soyad, email: user.email, favori_arac_id: user.favori_arac_id,
+                arac_marka: secili_marka,
+                arac_model: secili_model,
+                arac_resmi: arac_resmi, // YENİ EKLENEN RESİM URL'Sİ
                 toplam_km: user.toplam_km.toFixed(1), kazanc_tl: user.kazanc_tl.toFixed(2),
                 kurtarilan_co2_kg: user.kurtarilan_co2_kg.toFixed(1), kurtarilan_agac: parseFloat(agac_sayisi)
             }
@@ -97,12 +137,10 @@ const araclariListele = async (req, res) => {
 const rotaHesapla = async (req, res) => {
     let { kalkis, varis, sarj, arac_id, surus_modu = "normal", user_id } = req.query;
 
-    // UYGULAMADAN GELEN TEKİL SICAKLIĞI BİLEREK SİLİYORUZ (Zorla 3 nokta hesabı yapmak için)
     if (kalkis && kalkis.includes('|')) {
         kalkis = kalkis.split('|')[0]; 
     }
 
-    // BOŞLUKLU VE DETAYLI ADRESLERİ URL FORMATINA ÇEVİRİYORUZ
     const guvenliKalkis = encodeURIComponent(kalkis);
     const guvenliVaris = encodeURIComponent(varis);
 
@@ -123,7 +161,6 @@ const rotaHesapla = async (req, res) => {
         let mesafe_km = Math.floor(getDistance(kLat, kLon, vLat, vLon) * 1.2);
         let rota_koordinatlari = [];
 
-        // ÖNCE OSRM'DEN ROTAYI ÇEKİYORUZ Kİ ORTA NOKTAYI BULALIM
         try {
             const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${kLon},${kLat};${vLon},${vLat}?geometries=geojson&overview=full`;
             const osrmCevap = await fetch(osrmUrl);
@@ -134,7 +171,6 @@ const rotaHesapla = async (req, res) => {
             }
         } catch (e) {}
 
-        // Orta noktanın koordinatlarını buluyoruz
         let mLat = kLat, mLon = kLon;
         if (rota_koordinatlari.length > 0) {
             const midIndex = Math.floor(rota_koordinatlari.length / 2);
@@ -142,11 +178,10 @@ const rotaHesapla = async (req, res) => {
             mLon = rota_koordinatlari[midIndex].longitude;
         }
 
-        let sicaklik = 22; // Varsayılan ideal sıcaklık
+        let sicaklik = 22; 
         let detayli_hava_mesaji = "";
 
         try {
-            // 3 NOKTAYI AYNI ANDA ÇEKİYORUZ
             const [kCevap, mCevap, vCevap] = await Promise.all([
                 fetch(`https://api.open-meteo.com/v1/forecast?latitude=${kLat}&longitude=${kLon}&current_weather=true&timezone=auto`),
                 fetch(`https://api.open-meteo.com/v1/forecast?latitude=${mLat}&longitude=${mLon}&current_weather=true&timezone=auto`),
@@ -159,12 +194,10 @@ const rotaHesapla = async (req, res) => {
             const m_sicaklik = (mVeri && mVeri.current_weather) ? mVeri.current_weather.temperature : k_sicaklik;
             const v_sicaklik = (vVeri && vVeri.current_weather) ? vVeri.current_weather.temperature : 22;
 
-            // Hassas Ortalama Sıcaklık Hesaplama
             sicaklik = Math.round((k_sicaklik + m_sicaklik + v_sicaklik) / 3);
             detayli_hava_mesaji = `(Kalkış: ${Math.round(k_sicaklik)}°C | Orta Nokta: ${Math.round(m_sicaklik)}°C | Varış: ${Math.round(v_sicaklik)}°C)\n`;
         } catch (e) { }
 
-        // 1 DERECEYE BİLE DUYARLI DİNAMİK MENZİL HESABI
         let menzil_katsayisi = 1.0;
         let kayip_orani = 0;
 
