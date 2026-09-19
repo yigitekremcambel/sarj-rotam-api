@@ -7,8 +7,8 @@ const dogrulamaKodlari = {};
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-        user: 'erota.node@gmail.com', // <-- BURAYA YENİ AÇTIĞIN MAİLİ YAZ
-        pass: 'phyw ulre mkjp jevu'              // <-- BURAYA ALDIĞIN 16 HANELİ ŞİFREYİ YAZ (Boşluklu veya boşluksuz)
+        user: 'erota.node@gmail.com',
+        pass: 'phyw ulre mkjp jevu'
     }
 });
 
@@ -97,11 +97,9 @@ const araclariListele = async (req, res) => {
 const rotaHesapla = async (req, res) => {
     let { kalkis, varis, sarj, arac_id, surus_modu = "normal", user_id } = req.query;
 
-    let onYuzSicaklik = null;
+    // UYGULAMADAN GELEN TEKİL SICAKLIĞI BİLEREK SİLİYORUZ (Zorla 3 nokta hesabı yapmak için)
     if (kalkis && kalkis.includes('|')) {
-        const parcalar = kalkis.split('|');
-        kalkis = parcalar[0]; 
-        onYuzSicaklik = parcalar[1]; 
+        kalkis = kalkis.split('|')[0]; 
     }
 
     try {
@@ -121,6 +119,7 @@ const rotaHesapla = async (req, res) => {
         let mesafe_km = Math.floor(getDistance(kLat, kLon, vLat, vLon) * 1.2);
         let rota_koordinatlari = [];
 
+        // ÖNCE OSRM'DEN ROTAYI ÇEKİYORUZ Kİ ORTA NOKTAYI BULALIM
         try {
             const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${kLon},${kLat};${vLon},${vLat}?geometries=geojson&overview=full`;
             const osrmCevap = await fetch(osrmUrl);
@@ -131,25 +130,57 @@ const rotaHesapla = async (req, res) => {
             }
         } catch (e) {}
 
-        let sicaklik = 20; 
-        if (onYuzSicaklik && onYuzSicaklik !== "") {
-            sicaklik = Math.round(parseFloat(onYuzSicaklik));
-        } else {
-            try {
-                const havaCevap = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${kLat}&longitude=${kLon}&current_weather=true`);
-                const havaVeri = await havaCevap.json();
-                if (havaVeri && havaVeri.current_weather) sicaklik = Math.round(havaVeri.current_weather.temperature);
-            } catch (e) { }
+        // Orta noktanın koordinatlarını buluyoruz
+        let mLat = kLat, mLon = kLon;
+        if (rota_koordinatlari.length > 0) {
+            const midIndex = Math.floor(rota_koordinatlari.length / 2);
+            mLat = rota_koordinatlari[midIndex].latitude;
+            mLon = rota_koordinatlari[midIndex].longitude;
         }
 
-        let menzil_katsayisi = 1.0;
-        let hava_mesaji = "";
+        let sicaklik = 22; // Varsayılan ideal sıcaklık
+        let detayli_hava_mesaji = "";
 
-        if (sicaklik > 35) { menzil_katsayisi = 0.90; hava_mesaji = `Hava aşırı sıcak (${sicaklik}°C). Klima tam güçte çalıştığı için menzil %10 düştü.`; }
-        else if (sicaklik >= 20) { menzil_katsayisi = 1.0; hava_mesaji = `Hava sıcaklığı ideal (${sicaklik}°C). Batarya kimyası %100 verimle çalışıyor.`; }
-        else if (sicaklik >= 10) { menzil_katsayisi = 0.95; hava_mesaji = `Hava serin (${sicaklik}°C). Menzilde %5'lik ufak bir kayıp var.`; }
-        else if (sicaklik >= 0) { menzil_katsayisi = 0.85; hava_mesaji = `Hava soğuk (${sicaklik}°C). Isıtıcılar sebebiyle menzil %15 düştü.`; }
-        else { menzil_katsayisi = 0.70; hava_mesaji = `Hava dondurucu soğuk (${sicaklik}°C). Batarya kimyası yavaşladı, menzil %30 oranında azaldı!`; }
+        try {
+            // 3 NOKTAYI AYNI ANDA ÇEKİYORUZ
+            const [kCevap, mCevap, vCevap] = await Promise.all([
+                fetch(`https://api.open-meteo.com/v1/forecast?latitude=${kLat}&longitude=${kLon}&current_weather=true&timezone=auto`),
+                fetch(`https://api.open-meteo.com/v1/forecast?latitude=${mLat}&longitude=${mLon}&current_weather=true&timezone=auto`),
+                fetch(`https://api.open-meteo.com/v1/forecast?latitude=${vLat}&longitude=${vLon}&current_weather=true&timezone=auto`)
+            ]);
+
+            const [kVeri, mVeri, vVeri] = await Promise.all([kCevap.json(), mCevap.json(), vCevap.json()]);
+
+            const k_sicaklik = (kVeri && kVeri.current_weather) ? kVeri.current_weather.temperature : 22;
+            const m_sicaklik = (mVeri && mVeri.current_weather) ? mVeri.current_weather.temperature : k_sicaklik;
+            const v_sicaklik = (vVeri && vVeri.current_weather) ? vVeri.current_weather.temperature : 22;
+
+            // Hassas Ortalama Sıcaklık Hesaplama
+            sicaklik = Math.round((k_sicaklik + m_sicaklik + v_sicaklik) / 3);
+            detayli_hava_mesaji = `(Kalkış: ${Math.round(k_sicaklik)}°C | Orta Nokta: ${Math.round(m_sicaklik)}°C | Varış: ${Math.round(v_sicaklik)}°C)\n`;
+        } catch (e) { }
+
+        // 1 DERECEYE BİLE DUYARLI DİNAMİK MENZİL HESABI
+        let menzil_katsayisi = 1.0;
+        let kayip_orani = 0;
+
+        if (sicaklik > 22) {
+            kayip_orani = (sicaklik - 22) * 0.006;
+            menzil_katsayisi = 1.0 - kayip_orani;
+        } else if (sicaklik < 22) {
+            kayip_orani = (22 - sicaklik) * 0.008;
+            menzil_katsayisi = 1.0 - kayip_orani;
+        }
+
+        if (menzil_katsayisi < 0.60) menzil_katsayisi = 0.60;
+
+        const kayip_yuzdesi = Math.round((1.0 - menzil_katsayisi) * 100);
+        let hava_mesaji = detayli_hava_mesaji;
+        if (kayip_yuzdesi === 0) {
+            hava_mesaji += `Hava sıcaklığı rota boyunca ideal (${sicaklik}°C). Batarya %100 verimle çalışıyor.`;
+        } else {
+            hava_mesaji += `Rota ortalaması ${sicaklik}°C. İklimlendirme ve batarya kondisyonu sebebiyle menzilde yaklaşık %${kayip_yuzdesi} kayıp yaşanacak.`;
+        }
 
         const tumAraclar = await araclariGetir();
         const secilenArac = tumAraclar.find(a => String(a.id) === String(arac_id)) || tumAraclar[0];
@@ -205,7 +236,7 @@ const rotaHesapla = async (req, res) => {
             }
         }
 
-        let tavsiye = `${kalkis.charAt(0).toUpperCase() + kalkis.slice(1)} ile ${varis.charAt(0).toUpperCase() + varis.slice(1)} arası karayoluyla tahmini ${mesafe_km} km sürüyor.\n\n🌡️ Yapay Zeka Hava Durumu Analizi: ${hava_mesaji}\n\nSeçtiğin ${mod_metni} sürüş tarzıyla aracının şu anki şarjı sana tahmini ${kalan_menzil} km menzil sağlıyor.\n\n`;
+        let tavsiye = `${kalkis.charAt(0).toUpperCase() + kalkis.slice(1)} ile ${varis.charAt(0).toUpperCase() + varis.slice(1)} arası karayoluyla tahmini ${mesafe_km} km sürüyor.\n\n🌡️ Yapay Zeka Hava Durumu Analizi:\n${hava_mesaji}\n\nSeçtiğin ${mod_metni} sürüş tarzıyla aracının şu anki şarjı sana tahmini ${kalan_menzil} km menzil sağlıyor.\n\n`;
         tavsiye += kalan_menzil >= mesafe_km ? `Yolda hiç şarj etmeden rahatlıkla ulaşabilirsin! 🎉` : `Bu yolculukta yolda en az ${gerekli_sarj_noktalari_km.length} defa şarj molası vermen gerekecek. İşte şarjının biteceği bölgelerdeki istasyon alternatifleri: ⚡`;
 
         res.json({ durum: "Başarılı", tavsiye, istasyonlar: gercek_istasyonlar, rota: { kalkis: { enlem: kLat, boylam: kLon }, varis: { enlem: vLat, boylam: vLon } }, rota_cizgisi: rota_koordinatlari, maliyet_tl: maliyet, tasarruf_tl, tasarruf_co2_kg });
