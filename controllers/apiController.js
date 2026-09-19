@@ -102,14 +102,18 @@ const rotaHesapla = async (req, res) => {
         kalkis = kalkis.split('|')[0]; 
     }
 
+    // BOŞLUKLU VE DETAYLI ADRESLERİ URL FORMATINA ÇEVİRİYORUZ
+    const guvenliKalkis = encodeURIComponent(kalkis);
+    const guvenliVaris = encodeURIComponent(varis);
+
     try {
-        const kResponse = await fetch(`https://nominatim.openstreetmap.org/search?q=${kalkis}&format=json&limit=1`, { headers: { 'User-Agent': 'ev_rota_app_yigit' }});
-        const vResponse = await fetch(`https://nominatim.openstreetmap.org/search?q=${varis}&format=json&limit=1`, { headers: { 'User-Agent': 'ev_rota_app_yigit' }});
+        const kResponse = await fetch(`https://nominatim.openstreetmap.org/search?q=${guvenliKalkis}&format=json&limit=1`, { headers: { 'User-Agent': 'ev_rota_app_yigit' }});
+        const vResponse = await fetch(`https://nominatim.openstreetmap.org/search?q=${guvenliVaris}&format=json&limit=1`, { headers: { 'User-Agent': 'ev_rota_app_yigit' }});
         
         const kData = await kResponse.json();
         const vData = await vResponse.json();
 
-        if (kData.length === 0 || vData.length === 0) return res.json({ durum: "Hata", mesaj: "Şehirler haritada bulunamadı." });
+        if (kData.length === 0 || vData.length === 0) return res.json({ durum: "Hata", mesaj: "Şehirler veya belirtilen adres haritada bulunamadı." });
 
         const kLat = parseFloat(kData[0].lat);
         const kLon = parseFloat(kData[0].lon);
