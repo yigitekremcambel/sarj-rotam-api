@@ -75,8 +75,6 @@ const profilGetir = async (req, res) => {
     );
     if (user) {
         const agac_sayisi = (user.kurtarilan_co2_kg / 20).toFixed(1);
-        
-        // KULLANICININ SEÇTİĞİ ARACI 115 LİSTESİNDEN BULUYORUZ
         const tumAraclar = await araclariGetir();
         const favoriArac = tumAraclar.find(a => String(a.id) === String(user.favori_arac_id));
         
@@ -89,7 +87,6 @@ const profilGetir = async (req, res) => {
             secili_model = favoriArac.model;
             const m = secili_marka.toLowerCase();
             
-            // MARKALARA GÖRE DİNAMİK ARAÇ FOTOĞRAFI ATAMASI (Yüksek Kaliteli Arka Planı Şeffaf PNG'ler)
             if (m.includes("togg")) arac_resmi = "https://images.carexpert.com.au/resize/3000/vehicles/togg-t10x.png";
             else if (m.includes("tesla")) arac_resmi = "https://digitalassets.tesla.com/tesla-contents/image/upload/f_auto,q_auto/Model-Y-Step-1-Half-Desktop-LHD.png";
             else if (m.includes("byd")) arac_resmi = "https://ev-database.org/img/auto/BYD_SEAL/BYD_SEAL-01.png";
@@ -109,7 +106,7 @@ const profilGetir = async (req, res) => {
             else if (m.includes("nissan")) arac_resmi = "https://ev-database.org/img/auto/Nissan_Ariya/Nissan_Ariya-01.png";
             else if (m.includes("skoda")) arac_resmi = "https://ev-database.org/img/auto/Skoda_Enyaq_iV_80/Skoda_Enyaq_iV_80-01.png";
             else if (m.includes("toyota") || m.includes("subaru")) arac_resmi = "https://ev-database.org/img/auto/Toyota_bZ4X/Toyota_bZ4X-01.png";
-            else arac_resmi = `https://logo.clearbit.com/${m.replace(/\s/g, '')}.com`; // Tanınmayan markalar için şirket logosu çeker
+            else arac_resmi = `https://logo.clearbit.com/${m.replace(/\s/g, '')}.com`; 
         }
 
         res.json({
@@ -118,7 +115,7 @@ const profilGetir = async (req, res) => {
                 id: user.id, ad_soyad: user.ad_soyad, email: user.email, favori_arac_id: user.favori_arac_id,
                 arac_marka: secili_marka,
                 arac_model: secili_model,
-                arac_resmi: arac_resmi, // YENİ EKLENEN RESİM URL'Sİ
+                arac_resmi: arac_resmi, 
                 toplam_km: user.toplam_km.toFixed(1), kazanc_tl: user.kazanc_tl.toFixed(2),
                 kurtarilan_co2_kg: user.kurtarilan_co2_kg.toFixed(1), kurtarilan_agac: parseFloat(agac_sayisi)
             }
@@ -180,22 +177,45 @@ const rotaHesapla = async (req, res) => {
 
         let sicaklik = 22; 
         let detayli_hava_mesaji = "";
+        let egim_mesaji = "";
+        let egim_etkisi = 0; // Katsayıya eklenecek/çıkarılacak değer
 
         try {
-            const [kCevap, mCevap, vCevap] = await Promise.all([
+            // HAVA DURUMU VE RAKIM (ELEVATION) API'SİNİ AYNI ANDA ÇEKİYORUZ!
+            const [kCevap, mCevap, vCevap, egimCevap] = await Promise.all([
                 fetch(`https://api.open-meteo.com/v1/forecast?latitude=${kLat}&longitude=${kLon}&current_weather=true&timezone=auto`),
                 fetch(`https://api.open-meteo.com/v1/forecast?latitude=${mLat}&longitude=${mLon}&current_weather=true&timezone=auto`),
-                fetch(`https://api.open-meteo.com/v1/forecast?latitude=${vLat}&longitude=${vLon}&current_weather=true&timezone=auto`)
+                fetch(`https://api.open-meteo.com/v1/forecast?latitude=${vLat}&longitude=${vLon}&current_weather=true&timezone=auto`),
+                fetch(`https://api.open-meteo.com/v1/elevation?latitude=${kLat},${vLat}&longitude=${kLon},${vLon}`)
             ]);
 
-            const [kVeri, mVeri, vVeri] = await Promise.all([kCevap.json(), mCevap.json(), vCevap.json()]);
+            const [kVeri, mVeri, vVeri, egimVeri] = await Promise.all([kCevap.json(), mCevap.json(), vCevap.json(), egimCevap.json()]);
 
             const k_sicaklik = (kVeri && kVeri.current_weather) ? kVeri.current_weather.temperature : 22;
             const m_sicaklik = (mVeri && mVeri.current_weather) ? mVeri.current_weather.temperature : k_sicaklik;
             const v_sicaklik = (vVeri && vVeri.current_weather) ? vVeri.current_weather.temperature : 22;
 
             sicaklik = Math.round((k_sicaklik + m_sicaklik + v_sicaklik) / 3);
-            detayli_hava_mesaji = `(Kalkış: ${Math.round(k_sicaklik)}°C | Orta Nokta: ${Math.round(m_sicaklik)}°C | Varış: ${Math.round(v_sicaklik)}°C)\n`;
+            detayli_hava_mesaji = `🌡️ (Kalkış: ${Math.round(k_sicaklik)}°C | Orta Nokta: ${Math.round(m_sicaklik)}°C | Varış: ${Math.round(v_sicaklik)}°C)\n`;
+
+            // RAKIM/EĞİM HESAPLAMASI
+            if (egimVeri && egimVeri.elevation && egimVeri.elevation.length === 2) {
+                const k_yukseklik = egimVeri.elevation[0];
+                const v_yukseklik = egimVeri.elevation[1];
+                const yukseklik_farki = v_yukseklik - k_yukseklik; // Pozitifse tırmanış, negatifse iniş
+
+                if (yukseklik_farki > 100) {
+                    // Tırmanış: Her 100 metrede menzili %1 düşürüyoruz
+                    egim_etkisi = -(yukseklik_farki / 100) * 0.01;
+                    egim_mesaji = `⛰️ Rota Yokuşlu: Hedefe doğru net ${Math.round(yukseklik_farki)}m tırmanış sebebiyle motor daha fazla güç harcayacak.\n`;
+                } else if (yukseklik_farki < -100) {
+                    // İniş: Her 100 metrede rejeneratif frenleme %0.5 menzil kazandırır
+                    egim_etkisi = (Math.abs(yukseklik_farki) / 100) * 0.005;
+                    egim_mesaji = `📉 Rota İnişli: Hedefe doğru net ${Math.round(Math.abs(yukseklik_farki))}m inişte rejeneratif frenleme sayesinde menzil kazanacaksın.\n`;
+                } else {
+                    egim_mesaji = `🛣️ Rota Düz: Ciddi bir rakım farkı bulunmuyor, tüketim standart kalacak.\n`;
+                }
+            }
         } catch (e) { }
 
         let menzil_katsayisi = 1.0;
@@ -209,14 +229,22 @@ const rotaHesapla = async (req, res) => {
             menzil_katsayisi = 1.0 - kayip_orani;
         }
 
-        if (menzil_katsayisi < 0.60) menzil_katsayisi = 0.60;
+        // Hava durumunun üstüne rakım etkisini ekliyoruz
+        menzil_katsayisi += egim_etkisi;
 
-        const kayip_yuzdesi = Math.round((1.0 - menzil_katsayisi) * 100);
-        let hava_mesaji = detayli_hava_mesaji;
-        if (kayip_yuzdesi === 0) {
-            hava_mesaji += `Hava sıcaklığı rota boyunca ideal (${sicaklik}°C). Batarya %100 verimle çalışıyor.`;
+        // Absürt değerlere ulaşmasını engelleyen güvenlik sınırı
+        if (menzil_katsayisi < 0.50) menzil_katsayisi = 0.50;
+        if (menzil_katsayisi > 1.25) menzil_katsayisi = 1.25;
+
+        const sonuc_yuzde = Math.round(Math.abs(1.0 - menzil_katsayisi) * 100);
+        let hava_mesaji = egim_mesaji + detayli_hava_mesaji;
+
+        if (menzil_katsayisi < 1.0) {
+            hava_mesaji += `Hava şartları ve yokuş faktörleri birleştiğinde, batarya tüketiminde tahmini %${sonuc_yuzde} menzil kaybı yaşanacak.`;
+        } else if (menzil_katsayisi > 1.0) {
+            hava_mesaji += `İklim koşulları ideal, inişli yol ve rejenerasyon sayesinde menzilde %${sonuc_yuzde} ekstra kazanç sağlayacaksın!`;
         } else {
-            hava_mesaji += `Rota ortalaması ${sicaklik}°C. İklimlendirme ve batarya kondisyonu sebebiyle menzilde yaklaşık %${kayip_yuzdesi} kayıp yaşanacak.`;
+            hava_mesaji += `Hava ve yol koşulları mükemmel. Araç %100 verimle çalışacak.`;
         }
 
         const tumAraclar = await araclariGetir();
@@ -273,7 +301,7 @@ const rotaHesapla = async (req, res) => {
             }
         }
 
-        let tavsiye = `${kalkis.charAt(0).toUpperCase() + kalkis.slice(1)} ile ${varis.charAt(0).toUpperCase() + varis.slice(1)} arası karayoluyla tahmini ${mesafe_km} km sürüyor.\n\n🌡️ Yapay Zeka Hava Durumu Analizi:\n${hava_mesaji}\n\nSeçtiğin ${mod_metni} sürüş tarzıyla aracının şu anki şarjı sana tahmini ${kalan_menzil} km menzil sağlıyor.\n\n`;
+        let tavsiye = `${kalkis.charAt(0).toUpperCase() + kalkis.slice(1)} ile ${varis.charAt(0).toUpperCase() + varis.slice(1)} arası karayoluyla tahmini ${mesafe_km} km sürüyor.\n\n🤖 Yapay Zeka Analizi:\n${hava_mesaji}\n\nSeçtiğin ${mod_metni} sürüş tarzıyla aracının şu anki şarjı sana tahmini ${kalan_menzil} km menzil sağlıyor.\n\n`;
         tavsiye += kalan_menzil >= mesafe_km ? `Yolda hiç şarj etmeden rahatlıkla ulaşabilirsin! 🎉` : `Bu yolculukta yolda en az ${gerekli_sarj_noktalari_km.length} defa şarj molası vermen gerekecek. İşte şarjının biteceği bölgelerdeki istasyon alternatifleri: ⚡`;
 
         res.json({ durum: "Başarılı", tavsiye, istasyonlar: gercek_istasyonlar, rota: { kalkis: { enlem: kLat, boylam: kLon }, varis: { enlem: vLat, boylam: vLon } }, rota_cizgisi: rota_koordinatlari, maliyet_tl: maliyet, tasarruf_tl, tasarruf_co2_kg });
