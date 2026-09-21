@@ -6,10 +6,7 @@ const dogrulamaKodlari = {};
 
 const transporter = nodemailer.createTransport({
     service: 'gmail',
-    auth: {
-        user: 'erota.node@gmail.com',
-        pass: 'phyw ulre mkjp jevu'
-    }
+    auth: { user: 'erota.node@gmail.com', pass: 'phyw ulre mkjp jevu' }
 });
 
 const kodGonder = async (req, res) => {
@@ -24,30 +21,23 @@ const kodGonder = async (req, res) => {
 
     try {
         await transporter.sendMail({
-            from: 'EV Rota Planlayıcı <no-reply@evrota.com>',
+            from: 'e-Rota Uygulaması <no-reply@erota.com>',
             to: email,
-            subject: 'EV Rota Planlayıcı - Doğrulama Kodunuz',
+            subject: 'e-Rota - Doğrulama Kodunuz',
             text: `Merhaba!\n\nUygulamamıza kayıt olmak için doğrulama kodunuz: ${kod}\n\nBu kodu kimseyle paylaşmayın.`
         });
         res.json({ durum: "Başarılı", mesaj: "Doğrulama kodu e-posta adresinize gönderildi." });
     } catch (error) {
-        console.log("Mail Hatası:", error);
         res.json({ durum: "Hata", mesaj: "E-posta gönderilemedi. Lütfen geçerli bir adres girin." });
     }
 };
 
 const kayitOl = async (req, res) => {
     const { ad_soyad, email, sifre, kod } = req.body;
-
-    if (!kod || dogrulamaKodlari[email] !== kod) {
-        return res.json({ durum: "Hata", mesaj: "Doğrulama kodu hatalı veya süresi dolmuş!" });
-    }
+    if (!kod || dogrulamaKodlari[email] !== kod) return res.json({ durum: "Hata", mesaj: "Doğrulama kodu hatalı veya süresi dolmuş!" });
 
     try {
-        const result = await dbRun(
-            "INSERT INTO kullanicilar (ad_soyad, email, sifre) VALUES (?, ?, ?)",
-            [ad_soyad, email, sifreHashele(sifre)]
-        );
+        const result = await dbRun("INSERT INTO kullanicilar (ad_soyad, email, sifre) VALUES (?, ?, ?)", [ad_soyad, email, sifreHashele(sifre)]);
         delete dogrulamaKodlari[email]; 
         res.json({ durum: "Başarılı", mesaj: "Kayıt tamamlandı!", user_id: result.lastID, ad_soyad });
     } catch (error) {
@@ -57,36 +47,23 @@ const kayitOl = async (req, res) => {
 
 const girisYap = async (req, res) => {
     const { email, sifre } = req.body;
-    const user = await dbGet(
-        "SELECT id, ad_soyad, favori_arac_id FROM kullanicilar WHERE email = ? AND sifre = ?",
-        [email, sifreHashele(sifre)]
-    );
-    if (user) {
-        res.json({ durum: "Başarılı", user });
-    } else {
-        res.json({ durum: "Hata", mesaj: "E-posta veya şifre hatalı." });
-    }
+    const user = await dbGet("SELECT id, ad_soyad, favori_arac_id FROM kullanicilar WHERE email = ? AND sifre = ?", [email, sifreHashele(sifre)]);
+    if (user) res.json({ durum: "Başarılı", user });
+    else res.json({ durum: "Hata", mesaj: "E-posta veya şifre hatalı." });
 };
 
 const profilGetir = async (req, res) => {
-    const user = await dbGet(
-        "SELECT id, ad_soyad, email, favori_arac_id, toplam_km, kazanc_tl, kurtarilan_co2_kg FROM kullanicilar WHERE id = ?",
-        [req.params.user_id]
-    );
+    const user = await dbGet("SELECT id, ad_soyad, email, favori_arac_id, toplam_km, kazanc_tl, kurtarilan_co2_kg FROM kullanicilar WHERE id = ?", [req.params.user_id]);
     if (user) {
         const agac_sayisi = (user.kurtarilan_co2_kg / 20).toFixed(1);
         const tumAraclar = await araclariGetir();
         const favoriArac = tumAraclar.find(a => String(a.id) === String(user.favori_arac_id));
-        
         let arac_resmi = "https://cdn-icons-png.flaticon.com/512/5526/5526306.png"; 
-        let secili_marka = "Marka Seçilmedi";
-        let secili_model = "Araç Seçilmedi";
+        let secili_marka = "Marka Seçilmedi", secili_model = "Araç Seçilmedi";
 
         if (favoriArac) {
-            secili_marka = favoriArac.marka;
-            secili_model = favoriArac.model;
+            secili_marka = favoriArac.marka; secili_model = favoriArac.model;
             const m = secili_marka.toLowerCase();
-            
             if (m.includes("togg")) arac_resmi = "https://images.carexpert.com.au/resize/3000/vehicles/togg-t10x.png";
             else if (m.includes("tesla")) arac_resmi = "https://digitalassets.tesla.com/tesla-contents/image/upload/f_auto,q_auto/Model-Y-Step-1-Half-Desktop-LHD.png";
             else if (m.includes("byd")) arac_resmi = "https://ev-database.org/img/auto/BYD_SEAL/BYD_SEAL-01.png";
@@ -95,17 +72,6 @@ const profilGetir = async (req, res) => {
             else if (m.includes("volkswagen") || m.includes("vw")) arac_resmi = "https://ev-database.org/img/auto/Volkswagen_ID4/Volkswagen_ID4-01.png";
             else if (m.includes("audi")) arac_resmi = "https://ev-database.org/img/auto/Audi_Q4_e-tron/Audi_Q4_e-tron-01.png";
             else if (m.includes("porsche")) arac_resmi = "https://ev-database.org/img/auto/Porsche_Taycan/Porsche_Taycan-01.png";
-            else if (m.includes("hyundai")) arac_resmi = "https://ev-database.org/img/auto/Hyundai_IONIQ_5/Hyundai_IONIQ_5-01.png";
-            else if (m.includes("kia")) arac_resmi = "https://ev-database.org/img/auto/Kia_EV6/Kia_EV6-01.png";
-            else if (m.includes("mg")) arac_resmi = "https://ev-database.org/img/auto/MG_MG4_Electric/MG_MG4_Electric-01.png";
-            else if (m.includes("volvo") || m.includes("polestar")) arac_resmi = "https://ev-database.org/img/auto/Volvo_EX30/Volvo_EX30-01.png";
-            else if (m.includes("renault") || m.includes("dacia")) arac_resmi = "https://ev-database.org/img/auto/Renault_Megane_E-Tech/Renault_Megane_E-Tech-01.png";
-            else if (m.includes("peugeot") || m.includes("opel") || m.includes("citro")) arac_resmi = "https://ev-database.org/img/auto/Peugeot_e-208/Peugeot_e-208-01.png";
-            else if (m.includes("fiat") || m.includes("jeep")) arac_resmi = "https://ev-database.org/img/auto/Fiat_500e/Fiat_500e-01.png";
-            else if (m.includes("ford")) arac_resmi = "https://ev-database.org/img/auto/Ford_Mustang_Mach-E/Ford_Mustang_Mach-E-01.png";
-            else if (m.includes("nissan")) arac_resmi = "https://ev-database.org/img/auto/Nissan_Ariya/Nissan_Ariya-01.png";
-            else if (m.includes("skoda")) arac_resmi = "https://ev-database.org/img/auto/Skoda_Enyaq_iV_80/Skoda_Enyaq_iV_80-01.png";
-            else if (m.includes("toyota") || m.includes("subaru")) arac_resmi = "https://ev-database.org/img/auto/Toyota_bZ4X/Toyota_bZ4X-01.png";
             else arac_resmi = `https://logo.clearbit.com/${m.replace(/\s/g, '')}.com`; 
         }
 
@@ -113,16 +79,12 @@ const profilGetir = async (req, res) => {
             durum: "Başarılı",
             profil: {
                 id: user.id, ad_soyad: user.ad_soyad, email: user.email, favori_arac_id: user.favori_arac_id,
-                arac_marka: secili_marka,
-                arac_model: secili_model,
-                arac_resmi: arac_resmi, 
+                arac_marka: secili_marka, arac_model: secili_model, arac_resmi: arac_resmi, 
                 toplam_km: user.toplam_km.toFixed(1), kazanc_tl: user.kazanc_tl.toFixed(2),
                 kurtarilan_co2_kg: user.kurtarilan_co2_kg.toFixed(1), kurtarilan_agac: parseFloat(agac_sayisi)
             }
         });
-    } else {
-        res.json({ durum: "Hata", mesaj: "Kullanıcı bulunamadı." });
-    }
+    } else res.json({ durum: "Hata", mesaj: "Kullanıcı bulunamadı." });
 };
 
 const araclariListele = async (req, res) => {
@@ -133,204 +95,120 @@ const araclariListele = async (req, res) => {
 
 const rotaHesapla = async (req, res) => {
     let { kalkis, varis, sarj, arac_id, surus_modu = "normal", user_id } = req.query;
-
-    if (kalkis && kalkis.includes('|')) {
-        kalkis = kalkis.split('|')[0]; 
-    }
-
-    const guvenliKalkis = encodeURIComponent(kalkis);
-    const guvenliVaris = encodeURIComponent(varis);
+    if (kalkis && kalkis.includes('|')) kalkis = kalkis.split('|')[0]; 
+    const guvenliKalkis = encodeURIComponent(kalkis), guvenliVaris = encodeURIComponent(varis);
 
     try {
         const kResponse = await fetch(`https://nominatim.openstreetmap.org/search?q=${guvenliKalkis}&format=json&limit=1`, { headers: { 'User-Agent': 'ev_rota_app_yigit' }});
         const vResponse = await fetch(`https://nominatim.openstreetmap.org/search?q=${guvenliVaris}&format=json&limit=1`, { headers: { 'User-Agent': 'ev_rota_app_yigit' }});
-        
-        const kData = await kResponse.json();
-        const vData = await vResponse.json();
+        const kData = await kResponse.json(), vData = await vResponse.json();
 
-        if (kData.length === 0 || vData.length === 0) return res.json({ durum: "Hata", mesaj: "Şehirler veya belirtilen adres haritada bulunamadı." });
+        if (kData.length === 0 || vData.length === 0) return res.json({ durum: "Hata", mesaj: "Şehirler haritada bulunamadı." });
 
-        const kLat = parseFloat(kData[0].lat);
-        const kLon = parseFloat(kData[0].lon);
-        const vLat = parseFloat(vData[0].lat);
-        const vLon = parseFloat(vData[0].lon);
+        const kLat = parseFloat(kData[0].lat), kLon = parseFloat(kData[0].lon);
+        const vLat = parseFloat(vData[0].lat), vLon = parseFloat(vData[0].lon);
 
         let mesafe_km = Math.floor(getDistance(kLat, kLon, vLat, vLon) * 1.2);
         let rota_koordinatlari = [];
+        let tum_rotalar = []; 
 
         try {
-            const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${kLon},${kLat};${vLon},${vLat}?geometries=geojson&overview=full`;
+            const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${kLon},${kLat};${vLon},${vLat}?geometries=geojson&overview=full&alternatives=true`;
             const osrmCevap = await fetch(osrmUrl);
             const osrmVeri = await osrmCevap.json();
+            
             if (osrmVeri.routes && osrmVeri.routes.length > 0) {
                 mesafe_km = Math.floor(osrmVeri.routes[0].distance / 1000);
                 rota_koordinatlari = osrmVeri.routes[0].geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] }));
+                tum_rotalar = osrmVeri.routes.map(r => r.geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] })));
             }
         } catch (e) {}
 
-        let mLat = kLat, mLon = kLon;
-        if (rota_koordinatlari.length > 0) {
-            const midIndex = Math.floor(rota_koordinatlari.length / 2);
-            mLat = rota_koordinatlari[midIndex].latitude;
-            mLon = rota_koordinatlari[midIndex].longitude;
-        }
-
-        let sicaklik = 22; 
-        let detayli_hava_mesaji = "";
-        let egim_mesaji = "";
-        let egim_etkisi = 0; 
-
-        try {
-            const [kCevap, mCevap, vCevap, egimCevap] = await Promise.all([
-                fetch(`https://api.open-meteo.com/v1/forecast?latitude=${kLat}&longitude=${kLon}&current_weather=true&timezone=auto`),
-                fetch(`https://api.open-meteo.com/v1/forecast?latitude=${mLat}&longitude=${mLon}&current_weather=true&timezone=auto`),
-                fetch(`https://api.open-meteo.com/v1/forecast?latitude=${vLat}&longitude=${vLon}&current_weather=true&timezone=auto`),
-                fetch(`https://api.open-meteo.com/v1/elevation?latitude=${kLat},${vLat}&longitude=${kLon},${vLon}`)
-            ]);
-
-            const [kVeri, mVeri, vVeri, egimVeri] = await Promise.all([kCevap.json(), mCevap.json(), vCevap.json(), egimCevap.json()]);
-
-            const k_sicaklik = (kVeri && kVeri.current_weather) ? kVeri.current_weather.temperature : 22;
-            const m_sicaklik = (mVeri && mVeri.current_weather) ? mVeri.current_weather.temperature : k_sicaklik;
-            const v_sicaklik = (vVeri && vVeri.current_weather) ? vVeri.current_weather.temperature : 22;
-
-            sicaklik = Math.round((k_sicaklik + m_sicaklik + v_sicaklik) / 3);
-            detayli_hava_mesaji = `🌡️ (Kalkış: ${Math.round(k_sicaklik)}°C | Orta Nokta: ${Math.round(m_sicaklik)}°C | Varış: ${Math.round(v_sicaklik)}°C)\n`;
-
-            if (egimVeri && egimVeri.elevation && egimVeri.elevation.length === 2) {
-                const k_yukseklik = egimVeri.elevation[0];
-                const v_yukseklik = egimVeri.elevation[1];
-                const yukseklik_farki = v_yukseklik - k_yukseklik; 
-
-                if (yukseklik_farki > 100) {
-                    egim_etkisi = -(yukseklik_farki / 100) * 0.01;
-                    egim_mesaji = `⛰️ Rota Yokuşlu: Hedefe doğru net ${Math.round(yukseklik_farki)}m tırmanış sebebiyle motor daha fazla güç harcayacak.\n`;
-                } else if (yukseklik_farki < -100) {
-                    egim_etkisi = (Math.abs(yukseklik_farki) / 100) * 0.005;
-                    egim_mesaji = `📉 Rota İnişli: Hedefe doğru net ${Math.round(Math.abs(yukseklik_farki))}m inişte rejeneratif frenleme sayesinde menzil kazanacaksın.\n`;
-                } else {
-                    egim_mesaji = `🛣️ Rota Düz: Ciddi bir rakım farkı bulunmuyor, tüketim standart kalacak.\n`;
-                }
-            }
-        } catch (e) { }
-
-        let menzil_katsayisi = 1.0;
-        let kayip_orani = 0;
-
-        if (sicaklik > 22) {
-            kayip_orani = (sicaklik - 22) * 0.006;
-            menzil_katsayisi = 1.0 - kayip_orani;
-        } else if (sicaklik < 22) {
-            kayip_orani = (22 - sicaklik) * 0.008;
-            menzil_katsayisi = 1.0 - kayip_orani;
-        }
-
-        menzil_katsayisi += egim_etkisi;
-
-        if (menzil_katsayisi < 0.50) menzil_katsayisi = 0.50;
-        if (menzil_katsayisi > 1.25) menzil_katsayisi = 1.25;
-
-        const sonuc_yuzde = Math.round(Math.abs(1.0 - menzil_katsayisi) * 100);
-        let hava_mesaji = egim_mesaji + detayli_hava_mesaji;
-
-        if (menzil_katsayisi < 1.0) {
-            hava_mesaji += `Hava şartları ve yokuş faktörleri birleştiğinde, batarya tüketiminde tahmini %${sonuc_yuzde} menzil kaybı yaşanacak.`;
-        } else if (menzil_katsayisi > 1.0) {
-            hava_mesaji += `İklim koşulları ideal, inişli yol ve rejenerasyon sayesinde menzilde %${sonuc_yuzde} ekstra kazanç sağlayacaksın!`;
-        } else {
-            hava_mesaji += `Hava ve yol koşulları mükemmel. Araç %100 verimle çalışacak.`;
-        }
-
         const tumAraclar = await araclariGetir();
         const secilenArac = tumAraclar.find(a => String(a.id) === String(arac_id)) || tumAraclar[0];
-        const mevcut_enerji = (secilenArac.batarya_kwh * parseInt(sarj)) / 100;
         
-        let mod_metni = "🚙 Normal";
-        let gercek_tuketim = secilenArac.tuketim;
-        
-        if (surus_modu === "eco") { gercek_tuketim = secilenArac.tuketim * 0.85; mod_metni = "🌱 Eco"; }
-        else if (surus_modu === "hizli") { gercek_tuketim = secilenArac.tuketim * 1.25; mod_metni = "🚀 Hızlı"; }
+        // ==============================================================
+        // 🚀 DÜZELTİLMİŞ KATI ABRP MATEMATİĞİ (OTOYOL CEZASI)
+        // ==============================================================
+        let hiz_carpani = 1.40; // Otoyolda rüzgar direnci!
+        let mod_metni = "🚙 Normal (110-120 km/s)";
+        if (surus_modu === "eco") { hiz_carpani = 1.15; mod_metni = "🌱 Eco (90-100 km/s)"; } 
+        else if (surus_modu === "hizli") { hiz_carpani = 1.65; mod_metni = "🚀 Hızlı (130+ km/s)"; }
 
-        const kalan_menzil = Math.floor(((mevcut_enerji / gercek_tuketim) * 100) * menzil_katsayisi);
-        const tam_sarj_menzili = Math.floor(((secilenArac.batarya_kwh / gercek_tuketim) * 100) * menzil_katsayisi);
-        const pratik_menzil = Math.floor(tam_sarj_menzili * 0.75);
-        const eksik_mesafe = mesafe_km - kalan_menzil;
-        const ort_fiyat = Object.values(MARKA_FIYATLARI).reduce((a, b) => a + b) / Object.values(MARKA_FIYATLARI).length;
-        const maliyet = Math.floor(Math.max(0, (mesafe_km / 100) * (gercek_tuketim / menzil_katsayisi) - mevcut_enerji) * ort_fiyat);
+        const gercek_tuketim_kwh_100km = secilenArac.tuketim * hiz_carpani;
+        const batarya_kapasitesi = secilenArac.batarya_kwh;
+        const guvenli_alt_limit = batarya_kapasitesi * 0.10; // %10 dokunulmaz!
+        
+        let mevcut_enerji = (batarya_kapasitesi * parseInt(sarj)) / 100;
+        let kullanilabilir_enerji = Math.max(0, mevcut_enerji - guvenli_alt_limit);
+
+        const kalan_menzil = Math.floor((kullanilabilir_enerji / gercek_tuketim_kwh_100km) * 100);
+
+        // ==============================================================
+        // KONTROL PANELİ: BUNU TERMİNALDE GÖRECEKSİN!
+        // ==============================================================
+        console.log("\n--- YENİ ABRP HESAPLAMASI ÇALIŞTI ---");
+        console.log(`Araç: ${secilenArac.marka} ${secilenArac.model}`);
+        console.log(`Batarya: ${batarya_kapasitesi} kWh | Girilen Şarj: %${sarj}`);
+        console.log(`Kullanılabilir Enerji (%10 düşülmüş): ${kullanilabilir_enerji.toFixed(1)} kWh`);
+        console.log(`Fabrika Tüketimi: ${secilenArac.tuketim} | Otoyol Tüketimi (${mod_metni}): ${gercek_tuketim_kwh_100km.toFixed(1)} kWh/100km`);
+        console.log(`>>> ÇIKAN GERÇEK MENZİL: ${kalan_menzil} KM`);
+        console.log("--------------------------------------\n");
+
+        let gercek_istasyonlar = [];
+        let gerekli_sarj_noktalari_km = [];
+        const sarj_istasyonu_kullanilabilir_enerji = (batarya_kapasitesi * 0.80) - guvenli_alt_limit;
+        const optimum_istasyon_menzili = Math.floor((sarj_istasyonu_kullanilabilir_enerji / gercek_tuketim_kwh_100km) * 100);
+
+        if (kalan_menzil < mesafe_km && rota_koordinatlari.length > 0) {
+            let guncel_hedef_km = Math.max(5, kalan_menzil * 0.95);
+            while (guncel_hedef_km < mesafe_km) {
+                gerekli_sarj_noktalari_km.push(guncel_hedef_km);
+                guncel_hedef_km += optimum_istasyon_menzili;
+            }
+            
+            for (let i = 0; i < gerekli_sarj_noktalari_km.length; i++) {
+                let nokta_index = Math.floor(rota_koordinatlari.length * Math.min(0.99, gerekli_sarj_noktalari_km[i] / mesafe_km));
+                let hedef_nokta = rota_koordinatlari[nokta_index];
+                gercek_istasyonlar.push({ 
+                    id: `yedek_${i}`, isim: `${i+1}. Şarj Molası`, marka: ["ZES", "Eşarj", "Trugo", "Voltrun"][i % 4], guc_kw: 120, 
+                    koordinat: { enlem: hedef_nokta.latitude, boylam: hedef_nokta.longitude }
+                });
+            }
+        }
+
+        const toplam_gerekli_enerji = (mesafe_km / 100) * gercek_tuketim_kwh_100km;
+        const maliyet = Math.floor(Math.max(0, toplam_gerekli_enerji - kullanilabilir_enerji) * 8.5); 
         const tasarruf_tl = parseFloat((mesafe_km * 2.6).toFixed(2));
         const tasarruf_co2_kg = parseFloat((mesafe_km * 0.14).toFixed(1));
 
         if (user_id) {
-            await dbRun("UPDATE kullanicilar SET toplam_km = toplam_km + ?, kazanc_tl = kazanc_tl + ?, kurtarilan_co2_kg = kurtarilan_co2_kg + ?, favori_arac_id = ? WHERE id = ?", [mesafe_km, tasarruf_tl, tasarruf_co2_kg, String(arac_id), user_id]);
+            await dbRun("UPDATE kullanicilar SET toplam_km = toplam_km + ?, kazanc_tl = kazanc_tl + ?, kurtarilan_co2_kg = kurtarilan_co2_kg + ? WHERE id = ?", [mesafe_km, tasarruf_tl, tasarruf_co2_kg, user_id]);
         }
 
-        let gercek_istasyonlar = [];
-        let gerekli_sarj_noktalari_km = [];
-
-        if (eksik_mesafe > 0 && rota_koordinatlari.length > 0) {
-            let guncel_hedef_km = Math.max(5, kalan_menzil * 0.9);
-            while (guncel_hedef_km < mesafe_km) {
-                gerekli_sarj_noktalari_km.push(guncel_hedef_km);
-                guncel_hedef_km += pratik_menzil;
-            }
-
-            for (let i = 0; i < gerekli_sarj_noktalari_km.length; i++) {
-                let nokta_index = Math.floor(rota_koordinatlari.length * Math.min(0.99, gerekli_sarj_noktalari_km[i] / mesafe_km));
-                let hedef_nokta = rota_koordinatlari[nokta_index];
-                try {
-                    const ocmVeri = await (await fetch(`https://api.openchargemap.io/v3/poi/?output=json&latitude=${hedef_nokta.latitude}&longitude=${hedef_nokta.longitude}&distance=75&distanceunit=KM&maxresults=50&levelid=3`, { headers: { 'User-Agent': 'Mozilla/5.0' } })).json();
-                    if (ocmVeri.length > 0) {
-                        const st = ocmVeri[0];
-                        let guc_kw = 50;
-                        if (st.Connections) st.Connections.forEach(c => { if (c.PowerKW) guc_kw = Math.max(guc_kw, c.PowerKW); });
-                        gercek_istasyonlar.push({
-                            id: `${i}_0`, isim: st.AddressInfo.Title || `${i+1}. Şarj İstasyonu`, marka: (st.OperatorInfo && st.OperatorInfo.Title) ? st.OperatorInfo.Title : "Farklı Operatör",
-                            guc_kw: Math.floor(guc_kw), beklenen_sarj_suresi_dk: Math.floor((secilenArac.batarya_kwh * 0.7) / guc_kw * 60),
-                            koordinat: { enlem: st.AddressInfo.Latitude, boylam: st.AddressInfo.Longitude }
-                        });
-                    }
-                } catch (e) {
-                    const yedekMarkalar = ["ZES", "Eşarj", "Trugo", "Voltrun"];
-                    const rastgeleMarka = yedekMarkalar[i % yedekMarkalar.length];
-                    
-                    gercek_istasyonlar.push({ 
-                        id: `yedek_${i}`, 
-                        isim: `${i+1}. Şarj Noktası`, 
-                        marka: rastgeleMarka, 
-                        guc_kw: 120, 
-                        beklenen_sarj_suresi_dk: 30, 
-                        koordinat: { enlem: hedef_nokta.latitude, boylam: hedef_nokta.longitude }
-                    });
-                }
-            }
-        }
-
-        let tavsiye = `${kalkis.charAt(0).toUpperCase() + kalkis.slice(1)} ile ${varis.charAt(0).toUpperCase() + varis.slice(1)} arası karayoluyla tahmini ${mesafe_km} km sürüyor.\n\n🤖 Yapay Zeka Analizi:\n${hava_mesaji}\n\nSeçtiğin ${mod_metni} sürüş tarzıyla aracının şu anki şarjı sana tahmini ${kalan_menzil} km menzil sağlıyor.\n\n`;
+        let tavsiye = `${kalkis.charAt(0).toUpperCase() + kalkis.slice(1)} - ${varis.charAt(0).toUpperCase() + varis.slice(1)} arası otoyol mesafesi tahmini ${mesafe_km} km.\n\n`;
+        tavsiye += `📌 Otoyol rüzgar direnci (%40 hız cezası) ve %10 batarya güvenlik payı (SoC) hesaba katıldığında, aracının GERÇEK tüketimi ${gercek_tuketim_kwh_100km.toFixed(1)} kWh/100km olarak hesaplandı.\n\n`;
+        tavsiye += `🔋 Bu otoyol koşullarında mevcut şarjınla gidebileceğin GERÇEKÇİ menzil: ${kalan_menzil} km.\n\n`;
         
-        const varista_kalan_menzil = kalan_menzil - mesafe_km;
-
-        if (varista_kalan_menzil >= 30) {
-            tavsiye += `Yolda hiç şarj etmeden rahatlıkla ulaşabilirsin! (Hedefe vardığında yaklaşık ${varista_kalan_menzil} km güvence menzilin kalacak) 🎉`;
-        } else if (varista_kalan_menzil >= 0 && varista_kalan_menzil < 30) {
-            tavsiye += `⚠️ KRİTİK UYARI: Hedefe kağıt üzerinde ulaşıyorsun ancak vardığında sadece ${varista_kalan_menzil} km'lik çok riskli bir payın kalıyor! Beklenmedik sapmalarda yolda kalmamak için yola çıkmadan önce şarj etmeni veya mutlaka 'Eco' moda geçmeni şiddetle öneririz.`;
+        if (kalan_menzil >= mesafe_km) {
+            tavsiye += `Yolda hiç şarj etmeden rahatlıkla ulaşabilirsin! 🎉`;
         } else {
-            tavsiye += `Bu yolculukta yolda en az ${gerekli_sarj_noktalari_km.length} defa şarj molası vermen gerekecek. İşte şarjının biteceği bölgelerdeki istasyon alternatifleri: ⚡`;
+            tavsiye += `Bataryan kritik seviyeye düşmeden yolda ${gerekli_sarj_noktalari_km.length} defa hızlı şarj molası vermen gerekiyor. İşte rotadaki durakların: ⚡`;
         }
 
-        res.json({ durum: "Başarılı", tavsiye, istasyonlar: gercek_istasyonlar, rota: { kalkis: { enlem: kLat, boylam: kLon }, varis: { enlem: vLat, boylam: vLon } }, rota_cizgisi: rota_koordinatlari, maliyet_tl: maliyet, tasarruf_tl, tasarruf_co2_kg });
-    } catch (e) {
-        res.json({ durum: "Hata", mesaj: "Sunucu hatası." });
-    }
+        res.json({ 
+            durum: "Başarılı", tavsiye, istasyonlar: gercek_istasyonlar, 
+            rota: { kalkis: { enlem: kLat, boylam: kLon }, varis: { enlem: vLat, boylam: vLon } }, 
+            rota_cizgisi: rota_koordinatlari, tum_rotalar: tum_rotalar, maliyet_tl: maliyet 
+        });
+    } catch (e) { res.json({ durum: "Hata", mesaj: "Sunucu hatası." }); }
 };
 
-// YENİ EKLENEN HESAP SİLME FONKSİYONU
 const hesapSil = async (req, res) => {
     try {
         await dbRun("DELETE FROM kullanicilar WHERE id = ?", [req.params.user_id]);
-        res.json({ durum: "Başarılı", mesaj: "Hesap kalıcı olarak silindi." });
-    } catch (e) {
-        res.json({ durum: "Hata", mesaj: "Hesap silinirken bir hata oluştu." });
-    }
+        res.json({ durum: "Başarılı", mesaj: "Hesap silindi." });
+    } catch (e) { res.json({ durum: "Hata", mesaj: "Hesap silinemedi." }); }
 };
 
 module.exports = { kayitOl, girisYap, profilGetir, araclariListele, rotaHesapla, kodGonder, hesapSil };
