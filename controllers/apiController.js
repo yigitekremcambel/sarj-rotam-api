@@ -178,10 +178,9 @@ const rotaHesapla = async (req, res) => {
         let sicaklik = 22; 
         let detayli_hava_mesaji = "";
         let egim_mesaji = "";
-        let egim_etkisi = 0; // Katsayıya eklenecek/çıkarılacak değer
+        let egim_etkisi = 0; 
 
         try {
-            // HAVA DURUMU VE RAKIM (ELEVATION) API'SİNİ AYNI ANDA ÇEKİYORUZ!
             const [kCevap, mCevap, vCevap, egimCevap] = await Promise.all([
                 fetch(`https://api.open-meteo.com/v1/forecast?latitude=${kLat}&longitude=${kLon}&current_weather=true&timezone=auto`),
                 fetch(`https://api.open-meteo.com/v1/forecast?latitude=${mLat}&longitude=${mLon}&current_weather=true&timezone=auto`),
@@ -198,18 +197,15 @@ const rotaHesapla = async (req, res) => {
             sicaklik = Math.round((k_sicaklik + m_sicaklik + v_sicaklik) / 3);
             detayli_hava_mesaji = `🌡️ (Kalkış: ${Math.round(k_sicaklik)}°C | Orta Nokta: ${Math.round(m_sicaklik)}°C | Varış: ${Math.round(v_sicaklik)}°C)\n`;
 
-            // RAKIM/EĞİM HESAPLAMASI
             if (egimVeri && egimVeri.elevation && egimVeri.elevation.length === 2) {
                 const k_yukseklik = egimVeri.elevation[0];
                 const v_yukseklik = egimVeri.elevation[1];
-                const yukseklik_farki = v_yukseklik - k_yukseklik; // Pozitifse tırmanış, negatifse iniş
+                const yukseklik_farki = v_yukseklik - k_yukseklik; 
 
                 if (yukseklik_farki > 100) {
-                    // Tırmanış: Her 100 metrede menzili %1 düşürüyoruz
                     egim_etkisi = -(yukseklik_farki / 100) * 0.01;
                     egim_mesaji = `⛰️ Rota Yokuşlu: Hedefe doğru net ${Math.round(yukseklik_farki)}m tırmanış sebebiyle motor daha fazla güç harcayacak.\n`;
                 } else if (yukseklik_farki < -100) {
-                    // İniş: Her 100 metrede rejeneratif frenleme %0.5 menzil kazandırır
                     egim_etkisi = (Math.abs(yukseklik_farki) / 100) * 0.005;
                     egim_mesaji = `📉 Rota İnişli: Hedefe doğru net ${Math.round(Math.abs(yukseklik_farki))}m inişte rejeneratif frenleme sayesinde menzil kazanacaksın.\n`;
                 } else {
@@ -229,10 +225,8 @@ const rotaHesapla = async (req, res) => {
             menzil_katsayisi = 1.0 - kayip_orani;
         }
 
-        // Hava durumunun üstüne rakım etkisini ekliyoruz
         menzil_katsayisi += egim_etkisi;
 
-        // Absürt değerlere ulaşmasını engelleyen güvenlik sınırı
         if (menzil_katsayisi < 0.50) menzil_katsayisi = 0.50;
         if (menzil_katsayisi > 1.25) menzil_katsayisi = 1.25;
 
@@ -296,13 +290,32 @@ const rotaHesapla = async (req, res) => {
                         });
                     }
                 } catch (e) {
-                    gercek_istasyonlar.push({ id: `yedek_${i}`, isim: `${i+1}. Mola Bölgesi`, marka: "Bölge İstasyonu", guc_kw: 120, beklenen_sarj_suresi_dk: 30, koordinat: { enlem: hedef_nokta.latitude, boylam: hedef_nokta.longitude }});
+                    const yedekMarkalar = ["ZES", "Eşarj", "Trugo", "Voltrun"];
+                    const rastgeleMarka = yedekMarkalar[i % yedekMarkalar.length];
+                    
+                    gercek_istasyonlar.push({ 
+                        id: `yedek_${i}`, 
+                        isim: `${i+1}. Şarj Noktası`, 
+                        marka: rastgeleMarka, 
+                        guc_kw: 120, 
+                        beklenen_sarj_suresi_dk: 30, 
+                        koordinat: { enlem: hedef_nokta.latitude, boylam: hedef_nokta.longitude }
+                    });
                 }
             }
         }
 
         let tavsiye = `${kalkis.charAt(0).toUpperCase() + kalkis.slice(1)} ile ${varis.charAt(0).toUpperCase() + varis.slice(1)} arası karayoluyla tahmini ${mesafe_km} km sürüyor.\n\n🤖 Yapay Zeka Analizi:\n${hava_mesaji}\n\nSeçtiğin ${mod_metni} sürüş tarzıyla aracının şu anki şarjı sana tahmini ${kalan_menzil} km menzil sağlıyor.\n\n`;
-        tavsiye += kalan_menzil >= mesafe_km ? `Yolda hiç şarj etmeden rahatlıkla ulaşabilirsin! 🎉` : `Bu yolculukta yolda en az ${gerekli_sarj_noktalari_km.length} defa şarj molası vermen gerekecek. İşte şarjının biteceği bölgelerdeki istasyon alternatifleri: ⚡`;
+        
+        const varista_kalan_menzil = kalan_menzil - mesafe_km;
+
+        if (varista_kalan_menzil >= 30) {
+            tavsiye += `Yolda hiç şarj etmeden rahatlıkla ulaşabilirsin! (Hedefe vardığında yaklaşık ${varista_kalan_menzil} km güvence menzilin kalacak) 🎉`;
+        } else if (varista_kalan_menzil >= 0 && varista_kalan_menzil < 30) {
+            tavsiye += `⚠️ KRİTİK UYARI: Hedefe kağıt üzerinde ulaşıyorsun ancak vardığında sadece ${varista_kalan_menzil} km'lik çok riskli bir payın kalıyor! Beklenmedik sapmalarda yolda kalmamak için yola çıkmadan önce şarj etmeni veya mutlaka 'Eco' moda geçmeni şiddetle öneririz.`;
+        } else {
+            tavsiye += `Bu yolculukta yolda en az ${gerekli_sarj_noktalari_km.length} defa şarj molası vermen gerekecek. İşte şarjının biteceği bölgelerdeki istasyon alternatifleri: ⚡`;
+        }
 
         res.json({ durum: "Başarılı", tavsiye, istasyonlar: gercek_istasyonlar, rota: { kalkis: { enlem: kLat, boylam: kLon }, varis: { enlem: vLat, boylam: vLon } }, rota_cizgisi: rota_koordinatlari, maliyet_tl: maliyet, tasarruf_tl, tasarruf_co2_kg });
     } catch (e) {
@@ -310,4 +323,14 @@ const rotaHesapla = async (req, res) => {
     }
 };
 
-module.exports = { kayitOl, girisYap, profilGetir, araclariListele, rotaHesapla, kodGonder };
+// YENİ EKLENEN HESAP SİLME FONKSİYONU
+const hesapSil = async (req, res) => {
+    try {
+        await dbRun("DELETE FROM kullanicilar WHERE id = ?", [req.params.user_id]);
+        res.json({ durum: "Başarılı", mesaj: "Hesap kalıcı olarak silindi." });
+    } catch (e) {
+        res.json({ durum: "Hata", mesaj: "Hesap silinirken bir hata oluştu." });
+    }
+};
+
+module.exports = { kayitOl, girisYap, profilGetir, araclariListele, rotaHesapla, kodGonder, hesapSil };
