@@ -1,7 +1,7 @@
-require('dotenv').config();
 const { dbGet, dbRun } = require('../config/db');
 const { araclariGetir, sifreHashele, getDistance, MARKA_FIYATLARI } = require('../utils/helpers');
 const nodemailer = require('nodemailer');
+require('dotenv').config();
 
 const dogrulamaKodlari = {};
 
@@ -109,12 +109,11 @@ const rotaHesapla = async (req, res) => {
         const kLat = parseFloat(kData[0].lat), kLon = parseFloat(kData[0].lon);
         const vLat = parseFloat(vData[0].lat), vLon = parseFloat(vData[0].lon);
 
-        let mesafe_km = Math.floor(getDistance(kLat, kLon, vLat, vLon) * 1.2);
-        let rota_koordinatlari = [];
-        let tum_rotalar = []; 
+        let tum_rotalar = [];
+        let tum_mesafeler = [];
+        let ana_mesafe_km = Math.floor(getDistance(kLat, kLon, vLat, vLon) * 1.2);
 
         try {
-            // 🚀 OSRM YERİNE PROFESYONEL MAPBOX API KULLANIYORUZ
             const MAPBOX_TOKEN = process.env.MAPBOX_TOKEN; 
             const mapboxUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${kLon},${kLat};${vLon},${vLat}?alternatives=true&geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
             
@@ -122,26 +121,28 @@ const rotaHesapla = async (req, res) => {
             const mapboxVeri = await mapboxCevap.json();
             
             if (mapboxVeri.routes && mapboxVeri.routes.length > 0) {
-                mesafe_km = Math.floor(mapboxVeri.routes[0].distance / 1000);
-                rota_koordinatlari = mapboxVeri.routes[0].geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] }));
-                
-                // Mapbox bize gerçek alternatifleri veriyor, biz de haritaya yolluyoruz
-                tum_rotalar = mapboxVeri.routes.map(r => r.geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] })));
+                ana_mesafe_km = Math.floor(mapboxVeri.routes[0].distance / 1000);
+                mapboxVeri.routes.forEach(r => {
+                    tum_rotalar.push(r.geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] })));
+                    tum_mesafeler.push(Math.floor(r.distance / 1000));
+                });
             }
         } catch (e) {
             console.log("Mapbox Çekilemedi", e);
         }
 
+        // Güvenlik: Harita çekilemezse düz çizgi oluştur
+        if (tum_rotalar.length === 0) {
+            tum_rotalar = [[{latitude: kLat, longitude: kLon}, {latitude: vLat, longitude: vLon}]];
+            tum_mesafeler = [ana_mesafe_km];
+        }
+
         const tumAraclar = await araclariGetir();
         const secilenArac = tumAraclar.find(a => String(a.id) === String(arac_id)) || tumAraclar[0];
         
-        // ==============================================================
-        // 🚀 KATI ABRP MATEMATİĞİ (OTOYOL CEZASI)
-        // ==============================================================
         let hiz_carpani = 1.40; 
-        let mod_metni = "🚙 Normal (110-120 km/s)";
-        if (surus_modu === "eco") { hiz_carpani = 1.15; mod_metni = "🌱 Eco (90-100 km/s)"; } 
-        else if (surus_modu === "hizli") { hiz_carpani = 1.65; mod_metni = "🚀 Hızlı (130+ km/s)"; }
+        if (surus_modu === "eco") hiz_carpani = 1.15;
+        else if (surus_modu === "hizli") hiz_carpani = 1.65;
 
         const gercek_tuketim_kwh_100km = secilenArac.tuketim * hiz_carpani;
         const batarya_kapasitesi = secilenArac.batarya_kwh;
@@ -149,54 +150,70 @@ const rotaHesapla = async (req, res) => {
         
         let mevcut_enerji = (batarya_kapasitesi * parseInt(sarj)) / 100;
         let kullanilabilir_enerji = Math.max(0, mevcut_enerji - guvenli_alt_limit);
-
         const kalan_menzil = Math.floor((kullanilabilir_enerji / gercek_tuketim_kwh_100km) * 100);
 
-        let gercek_istasyonlar = [];
-        let gerekli_sarj_noktalari_km = [];
         const sarj_istasyonu_kullanilabilir_enerji = (batarya_kapasitesi * 0.80) - guvenli_alt_limit;
         const optimum_istasyon_menzili = Math.floor((sarj_istasyonu_kullanilabilir_enerji / gercek_tuketim_kwh_100km) * 100);
 
-        if (kalan_menzil < mesafe_km && rota_koordinatlari.length > 0) {
-            let guncel_hedef_km = Math.max(5, kalan_menzil * 0.95);
-            while (guncel_hedef_km < mesafe_km) {
-                gerekli_sarj_noktalari_km.push(guncel_hedef_km);
-                guncel_hedef_km += optimum_istasyon_menzili;
+        // 🚀 YENİ MANTIK: Gelen her alternatif rota için sıfırdan şarj istasyonu dizilimi hesapla
+        let tum_rotalar_istasyonlari = [];
+
+        for (let rIndex = 0; rIndex < tum_rotalar.length; rIndex++) {
+            let rKoordinatlar = tum_rotalar[rIndex];
+            let rMesafe = tum_mesafeler[rIndex];
+            let rIstasyonlar = [];
+
+            if (kalan_menzil < rMesafe && rKoordinatlar.length > 0) {
+                let gerekli_sarj_noktalari_km = [];
+                let guncel_hedef_km = Math.max(5, kalan_menzil * 0.95);
+                
+                while (guncel_hedef_km < rMesafe) {
+                    gerekli_sarj_noktalari_km.push(guncel_hedef_km);
+                    guncel_hedef_km += optimum_istasyon_menzili;
+                }
+                
+                for (let i = 0; i < gerekli_sarj_noktalari_km.length; i++) {
+                    let nokta_index = Math.floor(rKoordinatlar.length * Math.min(0.99, gerekli_sarj_noktalari_km[i] / rMesafe));
+                    let hedef_nokta = rKoordinatlar[nokta_index];
+                    rIstasyonlar.push({ 
+                        id: `yedek_${rIndex}_${i}`, 
+                        isim: `${i+1}. Şarj Molası`, 
+                        marka: ["ZES", "Eşarj", "Trugo", "Voltrun"][i % 4], 
+                        guc_kw: 120, 
+                        koordinat: { enlem: hedef_nokta.latitude, boylam: hedef_nokta.longitude }
+                    });
+                }
             }
-            
-            for (let i = 0; i < gerekli_sarj_noktalari_km.length; i++) {
-                let nokta_index = Math.floor(rota_koordinatlari.length * Math.min(0.99, gerekli_sarj_noktalari_km[i] / mesafe_km));
-                let hedef_nokta = rota_koordinatlari[nokta_index];
-                gercek_istasyonlar.push({ 
-                    id: `yedek_${i}`, isim: `${i+1}. Şarj Molası`, marka: ["ZES", "Eşarj", "Trugo", "Voltrun"][i % 4], guc_kw: 120, 
-                    koordinat: { enlem: hedef_nokta.latitude, boylam: hedef_nokta.longitude }
-                });
-            }
+            tum_rotalar_istasyonlari.push(rIstasyonlar);
         }
 
-        const toplam_gerekli_enerji = (mesafe_km / 100) * gercek_tuketim_kwh_100km;
+        const toplam_gerekli_enerji = (ana_mesafe_km / 100) * gercek_tuketim_kwh_100km;
         const maliyet = Math.floor(Math.max(0, toplam_gerekli_enerji - kullanilabilir_enerji) * 8.5); 
-        const tasarruf_tl = parseFloat((mesafe_km * 2.6).toFixed(2));
-        const tasarruf_co2_kg = parseFloat((mesafe_km * 0.14).toFixed(1));
+        const tasarruf_tl = parseFloat((ana_mesafe_km * 2.6).toFixed(2));
+        const tasarruf_co2_kg = parseFloat((ana_mesafe_km * 0.14).toFixed(1));
 
         if (user_id) {
-            await dbRun("UPDATE kullanicilar SET toplam_km = toplam_km + ?, kazanc_tl = kazanc_tl + ?, kurtarilan_co2_kg = kurtarilan_co2_kg + ? WHERE id = ?", [mesafe_km, tasarruf_tl, tasarruf_co2_kg, user_id]);
+            await dbRun("UPDATE kullanicilar SET toplam_km = toplam_km + ?, kazanc_tl = kazanc_tl + ?, kurtarilan_co2_kg = kurtarilan_co2_kg + ? WHERE id = ?", [ana_mesafe_km, tasarruf_tl, tasarruf_co2_kg, user_id]);
         }
 
-        let tavsiye = `${kalkis.charAt(0).toUpperCase() + kalkis.slice(1)} - ${varis.charAt(0).toUpperCase() + varis.slice(1)} arası otoyol mesafesi tahmini ${mesafe_km} km.\n\n`;
-        tavsiye += `📌 Otoyol rüzgar direnci (%40 hız cezası) ve %10 batarya güvenlik payı (SoC) hesaba katıldığında, aracının GERÇEK tüketimi ${gercek_tuketim_kwh_100km.toFixed(1)} kWh/100km olarak hesaplandı.\n\n`;
-        tavsiye += `🔋 Bu otoyol koşullarında mevcut şarjınla gidebileceğin GERÇEKÇİ menzil: ${kalan_menzil} km.\n\n`;
+        let tavsiye = `${kalkis.charAt(0).toUpperCase() + kalkis.slice(1)} - ${varis.charAt(0).toUpperCase() + varis.slice(1)} arası tahmini ${ana_mesafe_km} km.\n\n`;
+        tavsiye += `📌 Tüketim: ${gercek_tuketim_kwh_100km.toFixed(1)} kWh/100km.\n\n`;
         
-        if (kalan_menzil >= mesafe_km) {
-            tavsiye += `Yolda hiç şarj etmeden rahatlıkla ulaşabilirsin! 🎉`;
+        if (kalan_menzil >= ana_mesafe_km) {
+            tavsiye += `Yolda hiç şarj etmeden ulaşabilirsin! 🎉`;
         } else {
-            tavsiye += `Bataryan kritik seviyeye düşmeden yolda ${gerekli_sarj_noktalari_km.length} defa hızlı şarj molası vermen gerekiyor. İşte rotadaki durakların: ⚡`;
+            tavsiye += `Şarj molası vermen gerekiyor. İşte rotadaki durakların: ⚡`;
         }
 
         res.json({ 
-            durum: "Başarılı", tavsiye, istasyonlar: gercek_istasyonlar, 
+            durum: "Başarılı", 
+            tavsiye, 
+            istasyonlar: tum_rotalar_istasyonlari[0], 
+            tum_rotalar_istasyonlari: tum_rotalar_istasyonlari, // Ön yüze toplu istasyon listesi gidiyor
             rota: { kalkis: { enlem: kLat, boylam: kLon }, varis: { enlem: vLat, boylam: vLon } }, 
-            rota_cizgisi: rota_koordinatlari, tum_rotalar: tum_rotalar, maliyet_tl: maliyet 
+            rota_cizgisi: tum_rotalar[0], 
+            tum_rotalar: tum_rotalar, 
+            maliyet_tl: maliyet 
         });
     } catch (e) { res.json({ durum: "Hata", mesaj: "Sunucu hatası." }); }
 };
