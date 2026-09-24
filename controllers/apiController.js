@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { dbGet, dbRun } = require('../config/db');
 const { araclariGetir, sifreHashele, getDistance, MARKA_FIYATLARI } = require('../utils/helpers');
 const nodemailer = require('nodemailer');
@@ -113,47 +114,43 @@ const rotaHesapla = async (req, res) => {
         let tum_rotalar = []; 
 
         try {
-            const osrmUrl = `http://router.project-osrm.org/route/v1/driving/${kLon},${kLat};${vLon},${vLat}?geometries=geojson&overview=full&alternatives=true`;
-            const osrmCevap = await fetch(osrmUrl);
-            const osrmVeri = await osrmCevap.json();
+            // 🚀 OSRM YERİNE PROFESYONEL MAPBOX API KULLANIYORUZ
+            const MAPBOX_TOKEN = process.env.MAPBOX_TOKEN; 
+            const mapboxUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${kLon},${kLat};${vLon},${vLat}?alternatives=true&geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
             
-            if (osrmVeri.routes && osrmVeri.routes.length > 0) {
-                mesafe_km = Math.floor(osrmVeri.routes[0].distance / 1000);
-                rota_koordinatlari = osrmVeri.routes[0].geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] }));
-                tum_rotalar = osrmVeri.routes.map(r => r.geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] })));
+            const mapboxCevap = await fetch(mapboxUrl);
+            const mapboxVeri = await mapboxCevap.json();
+            
+            if (mapboxVeri.routes && mapboxVeri.routes.length > 0) {
+                mesafe_km = Math.floor(mapboxVeri.routes[0].distance / 1000);
+                rota_koordinatlari = mapboxVeri.routes[0].geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] }));
+                
+                // Mapbox bize gerçek alternatifleri veriyor, biz de haritaya yolluyoruz
+                tum_rotalar = mapboxVeri.routes.map(r => r.geometry.coordinates.map(c => ({ latitude: c[1], longitude: c[0] })));
             }
-        } catch (e) {}
+        } catch (e) {
+            console.log("Mapbox Çekilemedi", e);
+        }
 
         const tumAraclar = await araclariGetir();
         const secilenArac = tumAraclar.find(a => String(a.id) === String(arac_id)) || tumAraclar[0];
         
         // ==============================================================
-        // 🚀 DÜZELTİLMİŞ KATI ABRP MATEMATİĞİ (OTOYOL CEZASI)
+        // 🚀 KATI ABRP MATEMATİĞİ (OTOYOL CEZASI)
         // ==============================================================
-        let hiz_carpani = 1.40; // Otoyolda rüzgar direnci!
+        let hiz_carpani = 1.40; 
         let mod_metni = "🚙 Normal (110-120 km/s)";
         if (surus_modu === "eco") { hiz_carpani = 1.15; mod_metni = "🌱 Eco (90-100 km/s)"; } 
         else if (surus_modu === "hizli") { hiz_carpani = 1.65; mod_metni = "🚀 Hızlı (130+ km/s)"; }
 
         const gercek_tuketim_kwh_100km = secilenArac.tuketim * hiz_carpani;
         const batarya_kapasitesi = secilenArac.batarya_kwh;
-        const guvenli_alt_limit = batarya_kapasitesi * 0.10; // %10 dokunulmaz!
+        const guvenli_alt_limit = batarya_kapasitesi * 0.10; 
         
         let mevcut_enerji = (batarya_kapasitesi * parseInt(sarj)) / 100;
         let kullanilabilir_enerji = Math.max(0, mevcut_enerji - guvenli_alt_limit);
 
         const kalan_menzil = Math.floor((kullanilabilir_enerji / gercek_tuketim_kwh_100km) * 100);
-
-        // ==============================================================
-        // KONTROL PANELİ: BUNU TERMİNALDE GÖRECEKSİN!
-        // ==============================================================
-        console.log("\n--- YENİ ABRP HESAPLAMASI ÇALIŞTI ---");
-        console.log(`Araç: ${secilenArac.marka} ${secilenArac.model}`);
-        console.log(`Batarya: ${batarya_kapasitesi} kWh | Girilen Şarj: %${sarj}`);
-        console.log(`Kullanılabilir Enerji (%10 düşülmüş): ${kullanilabilir_enerji.toFixed(1)} kWh`);
-        console.log(`Fabrika Tüketimi: ${secilenArac.tuketim} | Otoyol Tüketimi (${mod_metni}): ${gercek_tuketim_kwh_100km.toFixed(1)} kWh/100km`);
-        console.log(`>>> ÇIKAN GERÇEK MENZİL: ${kalan_menzil} KM`);
-        console.log("--------------------------------------\n");
 
         let gercek_istasyonlar = [];
         let gerekli_sarj_noktalari_km = [];
