@@ -116,7 +116,7 @@ const rotaHesapla = async (req, res) => {
         try {
             // 🚀 OSRM YERİNE PROFESYONEL MAPBOX API KULLANIYORUZ
             const MAPBOX_TOKEN = process.env.MAPBOX_TOKEN; 
-            const mapboxUrl = `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${kLon},${kLat};${vLon},${vLat}?alternatives=true&geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
+            const mapboxUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${kLon},${kLat};${vLon},${vLat}?alternatives=true&geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
             
             const mapboxCevap = await fetch(mapboxUrl);
             const mapboxVeri = await mapboxCevap.json();
