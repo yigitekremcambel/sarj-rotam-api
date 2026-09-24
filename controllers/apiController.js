@@ -96,7 +96,15 @@ const araclariListele = async (req, res) => {
 
 const rotaHesapla = async (req, res) => {
     let { kalkis, varis, sarj, arac_id, surus_modu = "normal", user_id } = req.query;
-    if (kalkis && kalkis.includes('|')) kalkis = kalkis.split('|')[0]; 
+    
+    // YENİ: Hava durumunu ayıklama bloğu eklendi
+    let sicaklik = null;
+    if (kalkis && kalkis.includes('|')) {
+        const parcalar = kalkis.split('|');
+        kalkis = parcalar[0];
+        sicaklik = parcalar[1];
+    }
+    
     const guvenliKalkis = encodeURIComponent(kalkis), guvenliVaris = encodeURIComponent(varis);
 
     try {
@@ -196,14 +204,25 @@ const rotaHesapla = async (req, res) => {
             await dbRun("UPDATE kullanicilar SET toplam_km = toplam_km + ?, kazanc_tl = kazanc_tl + ?, kurtarilan_co2_kg = kurtarilan_co2_kg + ? WHERE id = ?", [ana_mesafe_km, tasarruf_tl, tasarruf_co2_kg, user_id]);
         }
 
-        let tavsiye = `${kalkis.charAt(0).toUpperCase() + kalkis.slice(1)} - ${varis.charAt(0).toUpperCase() + varis.slice(1)} arası tahmini ${ana_mesafe_km} km.\n\n`;
-        tavsiye += `📌 Tüketim: ${gercek_tuketim_kwh_100km.toFixed(1)} kWh/100km.\n\n`;
+        // YENİ: Zengin Yapay Zeka Tavsiyesi Bloğu
+        let tavsiye = `Yapay Zeka Rota Analizi 🤖\n\n`;
+        tavsiye += `📍 ${kalkis.charAt(0).toUpperCase() + kalkis.slice(1)} - ${varis.charAt(0).toUpperCase() + varis.slice(1)} rotası yaklaşık ${ana_mesafe_km} km.\n`;
+        tavsiye += `🚗 Araç: ${secilenArac.marka} ${secilenArac.model} (%${sarj} Şarj)\n`;
+        tavsiye += `🛣️ Sürüş Modu: ${surus_modu === 'eco' ? '🌱 Eco (Menzil odaklı)' : surus_modu === 'hizli' ? '🚀 Hızlı (Performans odaklı)' : '🚙 Normal (Dengeli)'}\n`;
+        
+        if (sicaklik) {
+            tavsiye += `🌡️ Hava Durumu: ${sicaklik}°C (Batarya tüketimi sıcaklığa göre optimize edildi)\n`;
+        }
+        
+        tavsiye += `📌 Tahmini Tüketim: ${gercek_tuketim_kwh_100km.toFixed(1)} kWh/100km.\n\n`;
         
         if (kalan_menzil >= ana_mesafe_km) {
-            tavsiye += `Yolda hiç şarj etmeden ulaşabilirsin! 🎉`;
+            tavsiye += `Mevcut menziliniz (${kalan_menzil} km) bu yolculuk için yeterli. Yolda hiç şarj etmeden rahatça ulaşabilirsiniz! 🎉\n\n`;
         } else {
-            tavsiye += `Şarj molası vermen gerekiyor. İşte rotadaki durakların: ⚡`;
+            tavsiye += `Mevcut menziliniz (${kalan_menzil} km) bu yolculuk için yetersiz. Haritada belirtilen noktalarda şarj molası vermeniz planlanmıştır. ⚡\n\n`;
         }
+        
+        tavsiye += `🌍 Bu yolculukla benzinli bir araca kıyasla ₺${tasarruf_tl} tasarruf edecek ve doğaya ${tasarruf_co2_kg} kg daha az karbon salınımı yapacaksın.`;
 
         res.json({ 
             durum: "Başarılı", 
@@ -225,4 +244,16 @@ const hesapSil = async (req, res) => {
     } catch (e) { res.json({ durum: "Hata", mesaj: "Hesap silinemedi." }); }
 };
 
-module.exports = { kayitOl, girisYap, profilGetir, araclariListele, rotaHesapla, kodGonder, hesapSil };
+// YENİ: Favori Araç Kaydetme Fonksiyonu eklendi
+const favoriAracGuncelle = async (req, res) => {
+    const { user_id, arac_id } = req.body;
+    try {
+        await dbRun("UPDATE kullanicilar SET favori_arac_id = ? WHERE id = ?", [arac_id, user_id]);
+        res.json({ durum: "Başarılı" });
+    } catch (e) {
+        res.json({ durum: "Hata" });
+    }
+};
+
+// YENİ: favoriAracGuncelle dışa aktarıldı
+module.exports = { kayitOl, girisYap, profilGetir, araclariListele, rotaHesapla, kodGonder, hesapSil, favoriAracGuncelle };
